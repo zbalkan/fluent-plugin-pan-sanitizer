@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Ruby ${{ matrix.ruby }} / Fluentd ${{ matrix.fluentd }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { ruby: '2.7', fluentd: '1.16.5' }
+          - { ruby: '2.7', fluentd: '1.17.1' }
+          - { ruby: '2.7', fluentd: '1.18.0' }
+          - { ruby: '3.1', fluentd: '1.16.5' }
+          - { ruby: '3.1', fluentd: '1.17.1' }
+          - { ruby: '3.1', fluentd: '1.18.0' }
+          - { ruby: '3.2', fluentd: '1.18.0' }
+          - { ruby: '3.2', fluentd: '1.19.3' }
+          - { ruby: '3.3', fluentd: '1.18.0' }
+          - { ruby: '3.3', fluentd: '1.19.3' }
+          - { ruby: '3.4', fluentd: '1.18.0' }
+          - { ruby: '3.4', fluentd: '1.19.3' }
+
+    env:
+      FLUENTD_VERSION: ${{ matrix.fluentd }}
+      BUNDLE_GEMFILE: ${{ github.workspace }}/Gemfile.ci
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+      - name: Verify resolved Fluentd version
+        run: |
+          bundle exec ruby -e '
+            require "fluent/version"
+            expected = ENV.fetch("FLUENTD_VERSION")
+            actual = Gem.loaded_specs.fetch("fluentd").version.to_s
+            abort "Expected Fluentd #{expected}, got #{actual}" unless actual == expected
+            puts "Fluentd #{actual}"
+          '
+      - name: Syntax check
+        run: find lib test benchmark -name '*.rb' -print0 | xargs -0 -n1 ruby -c
+      - name: Run tests
+        run: bundle exec rake test
+      - name: Build gem
+        run: gem build fluent-plugin-pan-sanitizer.gemspec
