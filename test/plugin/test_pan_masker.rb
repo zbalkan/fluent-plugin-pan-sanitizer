@@ -1,184 +1,55 @@
-require 'helper'
+require_relative '../helper'
 require 'fluent/plugin/pan/masker'
 
-# NOTE: The card number in the test doesn't exist in the world!
-
 class PANMaskerTest < Test::Unit::TestCase
+  VALID = '4019249331712145'.freeze
 
-  sub_test_case "valid?" do
-    test "valid digits" do
-      valid_card_number = [4, 0, 1, 9, 2, 4, 9, 3, 3, 1, 7, 1, 2, 1, 4, 5]
-      f = Fluent::PAN::Masker.new(//, :luhn, "")
-      assert_equal(true, f.valid?(valid_card_number))
-    end
+  def masker(pattern = /4[0-9]{15}/, algorithm = :luhn, mask = '****')
+    Fluent::PAN::Masker.new(pattern, algorithm, mask)
+  end
 
-    test "invalid digits" do
-      invalid_card_number = [4, 0, 1, 9, 2, 4, 9, 3, 9, 9, 9, 9, 9, 9, 9, 9]
-      f = Fluent::PAN::Masker.new(//, :luhn, "")
-      assert_equal(false, f.valid?(invalid_card_number))
-    end
+  def test_luhn
+    assert_equal(true, masker.valid?(VALID.chars.map(&:to_i)))
+    assert_equal(false, masker.valid?('4019249331712146'.chars.map(&:to_i)))
+    assert_equal(false, masker.valid?([]))
+    assert_equal(false, masker.valid?([0]))
+  end
 
-    test "always true when checksum algorithm is none" do
-      valid_card_number = [4, 0, 1, 9, 2, 4, 9, 3, 3, 1, 7, 1, 2, 1, 4, 5]
-      f = Fluent::PAN::Masker.new(//, :none, "")
-      assert_equal(true, f.valid?(valid_card_number))
-
-      invalid_card_number = [4, 0, 1, 9, 2, 4, 9, 3, 9, 9, 9, 9, 9, 9, 9, 9]
-      f = Fluent::PAN::Masker.new(//, :none, "")
-      assert_equal(true, f.valid?(invalid_card_number))
-
-      invalid_card_number = [9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9]
-      f = Fluent::PAN::Masker.new(//, :none, "")
-      assert_equal(true, f.valid?(invalid_card_number))
+  def test_preserve_unmatched_scalars
+    m = masker
+    [nil, true, false, 2.5, 123, ['a'], {'a' => 'b'}].each do |value|
+      assert_equal(value, m.mask_if_found_pan(value))
+      assert_equal(value.class, m.mask_if_found_pan(value).class)
     end
   end
 
-  sub_test_case "numerals_mask?" do
-    test "true" do
-      mask = 0
-      f = Fluent::PAN::Masker.new(//, :none, mask)
-      assert_equal(true, f.numerals_mask?)
-
-      mask = 00
-      f = Fluent::PAN::Masker.new(//, :none, mask)
-      assert_equal(true, f.numerals_mask?)
-
-      mask = 100
-      f = Fluent::PAN::Masker.new(//, :none, mask)
-      assert_equal(true, f.numerals_mask?)
-
-      mask = "0"
-      f = Fluent::PAN::Masker.new(//, :none, mask)
-      assert_equal(true, f.numerals_mask?)
-
-      mask = "00"
-      f = Fluent::PAN::Masker.new(//, :none, mask)
-      assert_equal(true, f.numerals_mask?)
-
-      mask = "100"
-      f = Fluent::PAN::Masker.new(//, :none, mask)
-      assert_equal(true, f.numerals_mask?)
-    end
-
-    test "false" do
-      mask = "*"
-      f = Fluent::PAN::Masker.new(//, :none, mask)
-      assert_equal(false, f.numerals_mask?)
-
-      mask = "*00"
-      f = Fluent::PAN::Masker.new(//, :none, mask)
-      assert_equal(false, f.numerals_mask?)
-
-      mask = "100*"
-      f = Fluent::PAN::Masker.new(//, :none, mask)
-      assert_equal(false, f.numerals_mask?)
-    end
+  def test_string_masking_and_idempotence
+    m = masker
+    assert_equal('prefix **** suffix', m.mask_if_found_pan("prefix #{VALID} suffix"))
+    assert_equal('****', m.mask_if_found_pan(m.mask_if_found_pan(VALID)))
   end
 
-  sub_test_case "mask_if_pan_found?" do
-    test "with numerals string mask" do
-      mask = "0000000000000000"
-      f = Fluent::PAN::Masker.new(/4\d{15}/, :luhn, mask)
+  def test_integer_masking_never_passes_through
+    assert_equal('****', masker.mask_if_found_pan(VALID.to_i))
+  end
 
-      filtered = f.mask_if_found_pan("4019249331712145")
-      assert_equal(String, filtered.class)
-      assert_equal("#{mask}", filtered)
+  def test_longer_numeric_identifier_is_not_partially_masked
+    assert_equal('9994019249331712145999', masker.mask_if_found_pan('9994019249331712145999'))
+  end
 
-      filtered = f.mask_if_found_pan("XXXX4019249331712145XXXX")
-      assert_equal(String, filtered.class)
-      assert_equal("XXXX#{mask}XXXX", filtered)
+  def test_capture_group_replacement
+    m = masker(/(4019)[0-9]{8}([0-9]{4})/, :luhn, '\\1********\\2')
+    assert_equal('4019********2145', m.mask_if_found_pan(VALID))
+  end
 
-      filtered = f.mask_if_found_pan(4019249331712145)
-      assert_equal(Integer, filtered.class)
-      assert_equal("#{mask}".to_i, filtered)
+  def test_fullwidth_digits_validate
+    m = masker(/４[０-９]{15}/)
+    assert_equal('****', m.mask_if_found_pan('４０１９２４９３３１７１２１４５'))
+    assert_equal('４０１９２４９３３１７１２１４６', m.mask_if_found_pan('４０１９２４９３３１７１２１４６'))
+  end
 
-      filtered = f.mask_if_found_pan(140192493317121459)
-      assert_equal(Integer, filtered.class)
-      assert_equal("1#{mask}9".to_i, filtered)
-    end
-
-    test "with numerals mask" do
-      mask = 4019111111111111
-      f = Fluent::PAN::Masker.new(/4\d{15}/, :luhn, mask)
-
-      filtered = f.mask_if_found_pan("4019249331712145")
-      assert_equal(String, filtered.class)
-      assert_equal("#{mask}", filtered)
-
-      filtered = f.mask_if_found_pan("XXXX4019249331712145XXXX")
-      assert_equal(String, filtered.class)
-      assert_equal("XXXX#{mask}XXXX", filtered)
-
-      filtered = f.mask_if_found_pan(4019249331712145)
-      assert_equal(Integer, filtered.class)
-      assert_equal("#{mask}".to_i, filtered)
-
-      filtered = f.mask_if_found_pan(140192493317121459)
-      assert_equal(Integer, filtered.class)
-      assert_equal("1#{mask}9".to_i, filtered)
-    end
-
-    test "with 0000000000000000 mask" do
-      mask = 0000000000000000
-      f = Fluent::PAN::Masker.new(/4\d{15}/, :luhn, mask)
-
-      filtered = f.mask_if_found_pan("4019249331712145")
-      assert_equal(String, filtered.class)
-      assert_equal("0", filtered)
-
-      filtered = f.mask_if_found_pan("XXXX4019249331712145XXXX")
-      assert_equal(String, filtered.class)
-      assert_equal("XXXX0XXXX", filtered)
-
-      filtered = f.mask_if_found_pan(4019249331712145)
-      assert_equal(Integer, filtered.class)
-      assert_equal(0, filtered)
-
-      filtered = f.mask_if_found_pan(140192493317121459)
-      assert_equal(Integer, filtered.class)
-      assert_equal(109, filtered)
-    end
-
-    test "with string mask" do
-      mask = "****"
-      f = Fluent::PAN::Masker.new(/4\d{15}/, :luhn, mask)
-
-      filtered = f.mask_if_found_pan("4019249331712145")
-      assert_equal(String, filtered.class)
-      assert_equal("#{mask}", filtered)
-
-      filtered = f.mask_if_found_pan("XXXX4019249331712145XXXX")
-      assert_equal(String, filtered.class)
-      assert_equal("XXXX#{mask}XXXX", filtered)
-
-      filtered = f.mask_if_found_pan(4019249331712145)
-      assert_equal(Integer, filtered.class)
-      assert_equal(4019249331712145, filtered)
-
-      filtered = f.mask_if_found_pan(140192493317121459)
-      assert_equal(Integer, filtered.class)
-      assert_equal(140192493317121459, filtered)
-    end
-
-    test "with string mask and force: true" do
-      mask = "****"
-      f = Fluent::PAN::Masker.new(/4\d{15}/, :luhn, mask, force: true)
-
-      filtered = f.mask_if_found_pan("4019249331712145")
-      assert_equal(String, filtered.class)
-      assert_equal("#{mask}", filtered)
-
-      filtered = f.mask_if_found_pan("XXXX4019249331712145XXXX")
-      assert_equal(String, filtered.class)
-      assert_equal("XXXX#{mask}XXXX", filtered)
-
-      filtered = f.mask_if_found_pan(4019249331712145)
-      assert_equal(String, filtered.class)
-      assert_equal("#{mask}", filtered)
-
-      filtered = f.mask_if_found_pan(140192493317121459)
-      assert_equal(String, filtered.class)
-      assert_equal("1#{mask}9", filtered)
-    end
+  def test_no_checksum_rejects_empty_digit_matches
+    m = masker(/ABC/, :none)
+    assert_equal('ABC', m.mask_if_found_pan('ABC'))
   end
 end
