@@ -52,15 +52,19 @@ Custom patterns are still supported, separately or alongside built-in brands:
 - The filter recursively processes strings inside hashes and arrays, preserving the shape and types of unaffected values.
 - A matched PAN inside an integer is converted to a masked string. This intentional type change prevents exposing a detected number.
 - A top-level or nested hash key listed in `ignore_keys` is excluded along with its entire value subtree.
-- By default, custom patterns reject matches adjacent to ASCII or full-width decimal digits; built-in brands also reject surrounding ASCII letters and underscores. Set `allow_embedded true` in a `<pan>` section to permit those matches.
+- By default, custom patterns reject matches adjacent to ASCII or full-width decimal digits. Built-in brands also reject adjacent digits, but allow surrounding ASCII letters and underscores. Set `allow_embedded true` in a `<pan>` section to permit embedded numeric matches.
 - Each `<pan>` section requires one or more `formats` expressions. At least one built-in brand or custom `<pan>` section must be provided.
 - Built-in brand maskers run before custom `<pan>` sections, so a brand that covers the same scheme as a custom section masks the value first with the top-level `mask`.
 - `checksum_algorithm` accepts `luhn` (default) or `none`. Luhn accepts candidate digit lengths from 12 to 19. Built-in brands match ASCII digits only; custom patterns may also match full-width digits, which Luhn validation supports. Other Unicode numeral scripts are not currently normalized. Only spaces and hyphens are accepted as separators in custom pattern candidates.
-- `mask` defaults to `****`. Replacement backreferences such as `\1` are supported. Matching integers are converted to masked strings.
+- `mask` defaults to `****`. Replacement capture references such as `\1` and `\k<name>` are resolved from the original match context. A replacement that retains every PAN digit is rejected. Matching integers are converted to masked strings.
+- `Float` and `Symbol` values are not inspected. A detected PAN in an `Integer` becomes a masked `String`; downstream consumers expecting numeric types must account for this.
+- `on_error mask_field` is the default. If sanitization fails, the affected value is replaced by `[PAN_SANITIZATION_FAILED]`; `on_error drop_record` drops the entire record instead. The filter exposes a `sanitization_errors` counter. Logs contain the exception class only, never candidate values.
 
 ### Security limitations
 
 Regex selection determines which PAN formats can be detected. Luhn is a checksum, not proof that a number is an issued card. Unsupported formats, card data outside configured fields, invalid-Luhn numbers, and values under ignored keys may remain unmasked. This is not a complete PCI DSS compliance solution. For strict data protection, combine the filter with an upstream policy that prevents unsanitized sensitive data from entering logs.
+
+Some malformed or invalidly encoded strings cannot be safely scanned. Such values take the fail-closed path rather than being emitted unchanged. Byte-preserving position-aware detection for invalid encodings remains planned work.
 
 Avoid excessively broad or catastrophically backtracking regex patterns. A large number of expressions increases per-record processing costs.
 
@@ -68,7 +72,7 @@ Avoid excessively broad or catastrophically backtracking regex patterns. A large
 
 - A configured brand pattern **and** a valid Luhn checksum are required to sanitize a built-in-brand candidate.
 - Brand patterns deliberately constrain prefixes and PAN lengths; newly introduced or unrecognized BIN conventions can be missed.
-- Built-in patterns use non-consuming alphanumeric boundaries, so adjacent letters, digits, and underscores prevent a match. A candidate followed by a space or hyphen and then a digit (for example, `4111111111111111 1227`) is also rejected and currently remains unmasked.
+- Built-in patterns exclude adjacent decimal digits, including digits following a recognized separator, to reduce partial matching of longer identifiers. Letters and underscores no longer prevent redaction. ASCII spaces, hyphens, dots, slashes and nonbreaking spaces are supported separators.
 - Custom patterns may use `checksum_algorithm none` explicitly, but built-in brands always enforce Luhn.
 - Checksum validation is a screening step, not proof of issuance or compliance.
 
