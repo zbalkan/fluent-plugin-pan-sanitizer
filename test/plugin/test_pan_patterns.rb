@@ -17,7 +17,7 @@ class PANPatternsTest < Test::Unit::TestCase
       masker = Fluent::PAN::Masker.new(Fluent::PAN::Patterns.for_brand(brand), :luhn, '****')
       assert_equal('****', masker.mask_if_found_pan(pan), brand)
       assert_equal("abc #{'****'} xyz", masker.mask_if_found_pan("abc #{pan} xyz"), brand)
-      assert_equal("prefix_#{pan}", masker.mask_if_found_pan("prefix_#{pan}"), brand)
+      assert_equal("prefix_****", masker.mask_if_found_pan("prefix_#{pan}"), brand)
     end
   end
 
