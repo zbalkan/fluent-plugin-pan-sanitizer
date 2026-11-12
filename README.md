@@ -37,14 +37,12 @@ Custom patterns are still supported, separately or alongside built-in brands:
   brands visa, mastercard
   <pan>
     formats /４[０-９]{15}/
-    checksum_algorithm luhn
     mask REDACTED
   </pan>
   <pan>
-    # amex
-    formats /((?:34|37)[0-9]{2}(?:\ |\-|)[0-9]{2})[0-9]{4}(?:\ |\-|)[0-9]{1}([0-9]{4})/
-    checksum_algorithm luhn
-    mask \1******\2
+    # amex 4-6-5 or unseparated; shows first 6 and last 4, keeps length and grouping
+    formats /(3[47][0-9]{2}([ -]?)[0-9]{2})[0-9]{4}([ -]?)[0-9]([0-9]{4})/
+    mask \1****\3*\4
   </pan>
 </filter>
 ```
@@ -56,8 +54,9 @@ Custom patterns are still supported, separately or alongside built-in brands:
 - A top-level or nested hash key listed in `ignore_keys` is excluded along with its entire value subtree.
 - By default, custom patterns reject matches adjacent to ASCII or full-width decimal digits; built-in brands also reject surrounding ASCII letters and underscores. Set `allow_embedded true` in a `<pan>` section to permit those matches.
 - Each `<pan>` section requires one or more `formats` expressions. At least one built-in brand or custom `<pan>` section must be provided.
-- `checksum_algorithm` accepts `luhn` (default) or `none`. Luhn accepts candidate digit lengths from 12 to 19. ASCII and full-width digits are supported. Other Unicode numeral scripts are not currently normalized. Only spaces and hyphens are accepted as separators in custom pattern candidates.
-- `mask` defaults to `****`. Replacement backreferences such as `\\1` are supported. Matching integers are converted to masked strings.
+- Built-in brand maskers run before custom `<pan>` sections, so a brand that covers the same scheme as a custom section masks the value first with the top-level `mask`.
+- `checksum_algorithm` accepts `luhn` (default) or `none`. Luhn accepts candidate digit lengths from 12 to 19. Built-in brands match ASCII digits only; custom patterns may also match full-width digits, which Luhn validation supports. Other Unicode numeral scripts are not currently normalized. Only spaces and hyphens are accepted as separators in custom pattern candidates.
+- `mask` defaults to `****`. Replacement backreferences such as `\1` are supported. Matching integers are converted to masked strings.
 
 ### Security limitations
 
@@ -69,7 +68,7 @@ Avoid excessively broad or catastrophically backtracking regex patterns. A large
 
 - A configured brand pattern **and** a valid Luhn checksum are required to sanitize a built-in-brand candidate.
 - Brand patterns deliberately constrain prefixes and PAN lengths; newly introduced or unrecognized BIN conventions can be missed.
-- Built-in patterns use non-consuming alphanumeric boundaries, so adjacent letters, digits, and underscores prevent a match.
+- Built-in patterns use non-consuming alphanumeric boundaries, so adjacent letters, digits, and underscores prevent a match. A candidate followed by a space or hyphen and then a digit (for example, `4111111111111111 1227`) is also rejected and currently remains unmasked.
 - Custom patterns may use `checksum_algorithm none` explicitly, but built-in brands always enforce Luhn.
 - Checksum validation is a screening step, not proof of issuance or compliance.
 
