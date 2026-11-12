@@ -37,8 +37,8 @@ class PANPatternsTest < Test::Unit::TestCase
   def test_invalid_checksum_and_boundaries
     masker = Fluent::PAN::Masker.new(Fluent::PAN::Patterns.for_brand('visa'), :luhn, '****')
     assert_equal('4111111111111112', masker.mask_if_found_pan('4111111111111112'))
-    assert_equal('a4111111111111111', masker.mask_if_found_pan('a4111111111111111'))
-    assert_equal('4111111111111111_abc', masker.mask_if_found_pan('4111111111111111_abc'))
+    assert_equal('a****', masker.mask_if_found_pan('a4111111111111111'))
+    assert_equal('****_abc', masker.mask_if_found_pan('4111111111111111_abc'))
     assert_equal('94111111111111111', masker.mask_if_found_pan('94111111111111111'))
     assert_equal('****!', masker.mask_if_found_pan('4111111111111111!'))
   end
@@ -57,5 +57,23 @@ class PANPatternsTest < Test::Unit::TestCase
   def test_unsupported_separators_are_not_silently_removed
     masker = Fluent::PAN::Masker.new(/4111x1111x1111x1111/, :luhn, '****')
     assert_equal('4111x1111x1111x1111', masker.mask_if_found_pan('4111x1111x1111x1111'))
+  end
+  def test_embedded_letters_and_underscores_are_masked
+    m = Fluent::PAN::Masker.new(Fluent::PAN::Patterns.for_brand('visa'), :luhn, '****')
+    assert_equal('card_****_ok', m.mask_if_found_pan('card_4111111111111111_ok'))
+    assert_equal('x****y', m.mask_if_found_pan('x4111111111111111y'))
+  end
+
+  def test_extra_separators_are_supported
+    m = Fluent::PAN::Masker.new(Fluent::PAN::Patterns.for_brand('visa'), :luhn, '****')
+    ['4111.1111.1111.1111', '4111/1111/1111/1111', "4111\u00A01111\u00A01111\u00A01111"].each do |value|
+      assert_equal('****', m.mask_if_found_pan(value))
+    end
+  end
+
+  def test_longer_digit_sequence_is_not_partially_masked
+    m = Fluent::PAN::Masker.new(Fluent::PAN::Patterns.for_brand('visa'), :luhn, '****')
+    assert_equal('941111111111111119', m.mask_if_found_pan('941111111111111119'))
+    assert_equal('4111111111111111-2', m.mask_if_found_pan('4111111111111111-2'))
   end
 end

@@ -47,7 +47,7 @@ module Fluent
               code - 48
             elsif code >= FULLWIDTH_ZERO && code <= FULLWIDTH_ZERO + 9
               code - FULLWIDTH_ZERO
-            elsif char == ' ' || char == '-'
+            elsif [' ', '-', '.', '/', "\u00A0"].include?(char)
               nil
             else
               invalid = true
