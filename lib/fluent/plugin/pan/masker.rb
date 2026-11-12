@@ -54,9 +54,38 @@ module Fluent
               nil
             end
           end.compact
-          !invalid && @checksum_func.call(digits) ? match.sub(@regexp, @mask) : match
+          next match if invalid || !@checksum_func.call(digits)
+
+          replacement = expand_replacement(position)
+          replacement_digits = replacement.each_char.filter_map do |char|
+            code = char.ord
+            if code.between?(48, 57)
+              code - 48
+            elsif code.between?(FULLWIDTH_ZERO, FULLWIDTH_ZERO + 9)
+              code - FULLWIDTH_ZERO
+            end
+          end
+          if replacement_digits == digits
+            raise ArgumentError, 'PAN replacement retains all original digits'
+          end
+          replacement
         end
         sanitized == original ? value : sanitized
+      end
+
+      # Expand capture references from the original match, not from the
+      # extracted substring. Contextual assertions (lookbehind/lookahead)
+      # therefore remain valid when constructing a replacement.
+      def expand_replacement(match_data)
+        @mask.gsub(/\\([1-9]|k<[^>]+>)/) do
+          reference = Regexp.last_match(1)
+          capture = if reference.start_with?('k<')
+                      match_data[reference[2...-1]]
+                    else
+                      match_data[reference.to_i]
+                    end
+          capture || ''
+        end
       end
 
       def valid?(digits)

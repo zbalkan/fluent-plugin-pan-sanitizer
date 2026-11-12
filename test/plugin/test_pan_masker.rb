@@ -52,4 +52,32 @@ class PANMaskerTest < Test::Unit::TestCase
     m = masker(/ABC/, :none)
     assert_equal('ABC', m.mask_if_found_pan('ABC'))
   end
+
+  def test_lookbehind_and_lookahead_mask_using_original_match
+    m = masker(/(?<=card=)4019[0-9]{12}(?=;)/)
+    assert_equal('card=****;', m.mask_if_found_pan('card=4019249331712145;'))
+  end
+
+  def test_contextual_capture_groups_are_preserved
+    m = masker(/(?<=card=)(4019)[0-9]{8}([0-9]{4})(?=;)/, :luhn, '\1********\2')
+    assert_equal('card=4019********2145;', m.mask_if_found_pan('card=4019249331712145;'))
+  end
+
+  def test_named_capture_replacement
+    m = masker(/(?<prefix>4019)[0-9]{12}/, :luhn, '\k<prefix>************')
+    assert_equal('4019************', m.mask_if_found_pan(VALID))
+  end
+
+  def test_replacement_cannot_reconstruct_full_pan
+    m = masker(/(4019)([0-9]{12})/, :luhn, '\1\2')
+    assert_raise(ArgumentError) { m.mask_if_found_pan(VALID) }
+  end
+
+  def test_adjacent_digits_and_idempotence_regression
+    m = masker(/4019[0-9]{12}/)
+    assert_equal("9#{VALID}9", m.mask_if_found_pan("9#{VALID}9"))
+    assert_equal('**** ****', m.mask_if_found_pan("#{VALID} #{VALID}"))
+    assert_equal('****', m.mask_if_found_pan(m.mask_if_found_pan(VALID)))
+  end
+
 end
