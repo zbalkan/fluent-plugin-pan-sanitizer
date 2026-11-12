@@ -15,9 +15,15 @@ module Fluent::Plugin
     config_param :ignore_keys,          :array,  default: []
     config_param :brands,               :array,  default: []
     config_param :mask,                 :string, default: '****'
+    config_param :on_error,             :enum, list: [:mask_field, :drop_record], default: :mask_field
+
+    ERROR_MARKER = '[PAN_SANITIZATION_FAILED]'.freeze
+    class DropUnsafeRecord < StandardError; end
+    attr_reader :sanitization_errors
 
     def initialize
       super
+      @sanitization_errors = 0
     end
 
     def configure(conf)
@@ -49,6 +55,11 @@ module Fluent::Plugin
 
     def filter(tag, time, record)
       sanitize_value(record)
+    rescue DropUnsafeRecord
+      nil
+    rescue StandardError => error
+      record_error(error)
+      @on_error == :drop_record ? nil : { 'pan_sanitizer_error' => ERROR_MARKER }
     end
 
     private
@@ -62,10 +73,23 @@ module Fluent::Plugin
       when Array
         value.map { |item| sanitize_value(item) }
       when String, Integer
+        raise ArgumentError, 'Invalid string encoding' if value.is_a?(String) && !value.valid_encoding?
         @pan_masker.reduce(value) { |current, masker| masker.mask_if_found_pan(current) }
       else
         value
       end
+    rescue DropUnsafeRecord
+      raise
+    rescue StandardError => error
+      record_error(error)
+      raise DropUnsafeRecord if @on_error == :drop_record
+      ERROR_MARKER
+    end
+
+    def record_error(error)
+      @sanitization_errors += 1
+      # Never include exception messages, record values or regex captures.
+      log.warn('PAN sanitizer failed closed', error_class: error.class.name)
     end
   end
 end

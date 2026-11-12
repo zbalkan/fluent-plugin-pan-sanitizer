@@ -84,4 +84,30 @@ class PANSanitizerFilterTest < Test::Unit::TestCase
   def test_missing_pan_fails_configuration
     assert_raise(Fluent::ConfigError) { driver('') }
   end
+  def test_invalid_encoding_masks_affected_field_and_counts_error
+    d = driver(CONFIG)
+    invalid = "prefix\xFF4019249331712145".b.force_encoding(Encoding::UTF_8)
+    d.run(default_tag: 'test') { d.feed({'card' => invalid, 'safe' => 'ok'}) }
+    assert_equal({'card' => '[PAN_SANITIZATION_FAILED]', 'safe' => 'ok'}, d.filtered_records.first)
+    assert_equal(1, d.instance.sanitization_errors)
+  end
+
+  def test_drop_record_on_sanitization_failure
+    d = driver(CONFIG + "\non_error drop_record\n")
+    invalid = "\xFF4019249331712145".b.force_encoding(Encoding::UTF_8)
+    d.run(default_tag: 'test') { d.feed({'card' => invalid}) }
+    assert_empty(d.filtered_records)
+    assert_equal(1, d.instance.sanitization_errors)
+  end
+
+  def test_failed_replacement_cannot_pass_through
+    conf = %[
+      <pan>
+        formats /(4019)([0-9]{12})/
+        mask \\1\\2
+      </pan>
+    ]
+    result = sanitize({'card' => '4019249331712145'}, conf)
+    assert_equal('[PAN_SANITIZATION_FAILED]', result['card'])
+  end
 end
