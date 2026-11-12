@@ -40,6 +40,12 @@ Custom patterns are still supported, separately or alongside built-in brands:
     checksum_algorithm luhn
     mask REDACTED
   </pan>
+  <pan>
+    # amex
+    formats /((?:34|37)[0-9]{2}(?:\ |\-|)[0-9]{2})[0-9]{4}(?:\ |\-|)[0-9]{1}([0-9]{4})/
+    checksum_algorithm luhn
+    mask \1******\2
+  </pan>
 </filter>
 ```
 
